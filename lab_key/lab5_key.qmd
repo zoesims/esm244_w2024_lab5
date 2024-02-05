@@ -1,0 +1,343 @@
+---
+title: "ESM 244 Lab 5 key"
+author: "Casey O'Hara"
+date: "2/4/2024"
+format: 
+  html:
+    code-fold: show
+    embed-resources: true
+    toc: true
+execute:
+  message: false
+  warning: false
+---
+
+```{r setup}
+library(tidyverse)
+library(palmerpenguins)
+library(AICcmodavg)    ### probably have to install this one
+library(equatiomatic)  ### remotes::install_github("datalorax/equatiomatic")
+```
+
+# Summary
+
+We want to create a model we can use in the field to quickly and easily estimate a penguin's mass, based on the subset of data in the `palmerpenguins` package.
+
+Objectives:
+
+* Clean and prep the data
+* Set up several competing models
+* Compare models using information criteria
+* Compare models using cross-validation
+    * Sub-objective: practice writing functions
+    * Sub-objective: iterating with for-loops and purrr
+
+# Set up models
+
+## Clean the data
+
+```{r}
+penguins_clean <- penguins %>%
+  drop_na() %>%
+  rename(mass = body_mass_g,
+         bill_l = bill_length_mm,
+         bill_d = bill_depth_mm,
+         flip_l = flipper_length_mm)
+```
+
+## Create linear regression models
+
+```{r}
+
+mdl1 <- lm(mass ~ bill_l + bill_d + flip_l + species + sex + island, 
+                  data = penguins_clean)
+# summary(mdl1)
+```
+
+R has the ability to recognize a formula to be used in modeling... let's take advantage of that!
+
+```{r}
+f1 <- mass ~ bill_l + bill_d + flip_l + species + sex + island
+# class(f1)
+mdl1 <- lm(f1, data = penguins_clean)
+
+
+f2 <- mass ~ bill_l + bill_d + flip_l + species + sex
+mdl2 <- lm(f2, data = penguins_clean)
+# summary(mdl2)
+```
+
+``` {r}
+f3 <- mass ~ bill_d + flip_l + species + sex
+mdl3 <- lm(f3, data = penguins_clean)
+# summary(mdl3)
+```
+
+These models all look pretty good!  All the adjusted R^2^ indicate that any of these models explains around 87% of the observed variance.  Benefits and drawbacks to each?
+
+# Comparing models 
+
+## Comparing models using information criteria
+
+Let's compare these models using AIC: Akaike Information Criteria and BIC: Bayesian Information Criteria - calculated from:
+
+* the number of independent variables included in the model
+* the degree to which the model fits the data
+* the number of observations (BIC only)
+
+AIC identifies the model that maximizes the likelihood of those parameter values given these data, using the fewest possible independent variables - penalizes overly complex models.  A lower score is better; a difference of 2 indicates a significant difference in model fit.  BIC is basically the same, though penalizes parameters more harshly than AIC as datasets grow larger.
+
+```{r}
+AIC(mdl1, mdl2, mdl3) 
+#       df       AIC
+# mdl1	10	4727.242		
+# mdl2	 8	4723.938		
+# mdl3	 7	4728.575
+
+BIC(mdl1, mdl2, mdl3) 
+#       df       BIC
+# mdl1  10  4765.324
+# mdl2   8  4754.403
+# mdl3   7  4755.232
+
+AICcmodavg::AICc(mdl1)
+AICc(mdl2)
+AICc(mdl3)
+
+AICcmodavg::aictab(list(mdl1, mdl2, mdl3))
+AICcmodavg::bictab(list(mdl1, mdl2, mdl3))
+```
+
+From AIC it appears the second model is "best" by dropping info about the island (which requires 2 parameters!).   However, the first model, even with the penalty, is slightly better (though not significantly!) than model 3.
+
+What does BIC have to say?
+
+## Comparing models with Cross validation
+
+But: this model is based on how well it fits the existing data set.  We want a model that will perform well in predicting data outside of the dataset used to create the model!  Here we will use a common tool in supervised machine learning - separating our data into a training dataset, to tune the parameters of the competing models, and a testing dataset to see how how well the models predict unseen data.
+
+First let's break the data into 10 chunks (for 10-fold cross-validation), and assign a test set and training set.
+
+```{r}
+
+folds <- 10
+fold_vec <- rep(1:folds, length.out = nrow(penguins_clean))
+
+set.seed(42) ### good idea for random numbers or sampling
+
+penguins_fold <- penguins_clean %>%
+  mutate(group = sample(fold_vec, size = n(), replace = FALSE))
+table(penguins_fold$group)
+
+### first fold for testing, the rest for training
+test_df <- penguins_fold %>%
+  filter(group == 1)
+
+train_df <- penguins_fold %>%
+  filter(group != 1)
+```
+
+### How can we tell how well our model works?
+
+Write a quick function to calculate the root-mean-square error, which we can use to see which model predicts more accurately.
+
+Root - Mean - Square - Error
+
+### Why write a function?
+
+* make a chunk of code easily reusable
+* give a meaningful name to a chunk of code
+* functions are used in every coding language; knowing how to write them is a very valuable and transferable skill!
+
+```{r}
+calc_rmse <- function(x, y) {
+  ### x is a vector of predicted values, y is a vector of observed values
+  ### (or vice versa!)
+  rmse <- (x - y)^2 %>% mean() %>% sqrt()
+  return(rmse)
+}
+```
+
+### Train model on training set
+
+Using just the training subset, train some models using the formulas defined above.  The resulting parameters should be similar but not the same as those we got when we used the entire dataset to train the model.
+
+
+```{r}
+training_lm1 <- lm(f1, data = train_df)
+# summary(training_lm2)
+
+training_lm2 <- lm(f2, data = train_df)
+# summary(training_lm3)
+
+training_lm3 <- lm(f3, data = train_df)
+```
+
+### Compare models using RMSE based on first fold
+
+For all three models, predict the mass of penguins based on predictor variable values in our testing dataset, then use our RMSE function to see how well the model compares to the observed masses.
+
+```{r}
+predict_test <- test_df %>%
+  mutate(model1 = predict(training_lm1, test_df),
+         model2 = predict(training_lm2, test_df),
+         model3 = predict(training_lm3, test_df)) 
+
+rmse_predict_test <- predict_test %>%
+  summarize(rmse_mdl1 = calc_rmse(model1, mass),
+            rmse_mdl2 = calc_rmse(model2, mass),
+            rmse_mdl3 = calc_rmse(model3, mass))
+
+rmse_predict_test
+#   rmse_mdl1 rmse_mdl2 rmse_mdl3
+#       <dbl>     <dbl>     <dbl>
+# 1      326.      319.      327.
+```
+
+Quite a difference, and generally agrees with the AIC results.
+
+### 10-fold cross validation: `for` loop
+
+But now, let's up the game to K-fold cross validation.  We already assigned 10 groups, so we will do 10-fold cross validation.  Let's iterate for each group to have a turn being the testing data, using the other groups as training.  Here we will just focus on model 1.
+
+`For` loops are a structure common to most programming languages, like functions - knowing how to use them (and their cousins, like the `apply` functions and the `purrr` package)  will make you a more effective coder.
+
+```{r}
+### initialize a blank vector
+rmse_vec <- vector(length = folds)
+
+for(i in 1:folds) {
+  # i <- 1
+  kfold_test_df <- penguins_fold %>%
+    filter(group == i)
+  kfold_train_df <- penguins_fold %>%
+    filter(group != i)
+  
+  kfold_lm1 <- lm(f1, data = kfold_train_df)
+
+  kfold_pred_df <- kfold_test_df %>%
+    mutate(mdl = predict(kfold_lm1, kfold_test_df))
+  kfold_rmse <- kfold_pred_df %>%
+    summarize(rmse_mdl = calc_rmse(mdl, mass))
+
+  ### assign result to the rmse_vec in the proper spot
+  rmse_vec[i] <- kfold_rmse$rmse_mdl
+}
+
+# mean(rmse_vec)
+```
+
+### Convert middle text to a function
+
+Let's make a function of all that junk in the middle of the loop - put a name to it, and make it reusable!  We need to tell the function:
+
+* the dataframe with folds
+* the fold to set aside for testing
+* the model formula to be used.
+
+Copy and paste the stuff inside the for loop down to a new code chunk.
+
+```{r}
+
+kfold_cv <- function(i, df, formula) {
+  ### WAS: kfold_train_df <- penguins_fold %>%
+  ### WAS:   filter(group == i)
+  kfold_train_df <- df %>%
+    filter(group != i)
+  ### WAS: kfold_test_df <- penguins_fold %>%
+  ### WAS:   filter(group == i)
+  kfold_test_df <- df %>%
+    filter(group == i)
+  
+  ### WAS: kfold_lm1 <- lm(f1, data = kfold_train_df)
+  kfold_lm <- lm(formula, data = kfold_train_df)
+
+  ### Change XXX_lm1 to just XXX_lm in the following lines
+  kfold_pred_df <- kfold_test_df %>%
+    mutate(mdl = predict(kfold_lm, kfold_test_df))
+  kfold_rmse <- kfold_pred_df %>%
+    summarize(rmse_mdl = calc_rmse(mdl, mass))
+
+  ### WAS: rmse_vec[i] <- kfold_rmse$rmse_mdl
+  ### IS: return the value directly
+  return(kfold_rmse$rmse_mdl)
+}
+```
+
+```{r}
+
+### Test the function
+rmse_fold1 <- kfold_cv(i = 1, df = penguins_fold, formula = f1)
+
+### initialize a blank list
+rmse_loop_vec <- vector(length = folds)
+
+### loop over all folds, apply our function
+for(i in 1:folds) {
+  rmse_loop_vec[i] <- kfold_cv(i = i, df = penguins_fold, formula = f1)
+}
+
+# mean(rmse_loop_vec)
+
+```
+
+### Cross validation, using `purrr::map()`!
+
+A `for` loop applies a set of code instructions (or a function) repeatedly for all values in a sequence.
+
+The `purrr` package has functions to quickly apply a function across a sequence.  The basic function is `map()`, but variants of `map()` work well if you know what the output of your function will be (a character, numeric, dataframe, etc).
+
+```{r}
+### how many letters in each month name? map the sequence of month 
+### names to the nchar() function
+# month.name
+# map(month.name, nchar)
+# map_int(month.name, nchar)
+```
+
+
+```{r}
+rmse_map_list <- purrr::map(.x = 1:folds, .f = kfold_cv, 
+                            ### our function needs two more arguments:
+                            df = penguins_fold, formula = f1)
+rmse_map_vec <- unlist(rmse_map_list)
+mean(rmse_map_vec)
+
+### OR we know the output is a double (a non-integer number)
+rmse_map_vec <- map_dbl(.x = 1:folds, .f = kfold_cv, 
+                        ### our function needs two more arguments:
+                        df = penguins_fold, formula = f1)
+# mean(rmse_map_vec)
+```
+
+### Finally, let's try this on all our models!
+
+`across` inside a `summarize` or `mutate` applies a function to different columns, kinda like `purrr::map`!
+```{r}
+rmse_df <- data.frame(j = 1:folds) %>%
+  mutate(rmse_mdl1 = map_dbl(j, kfold_cv, df = penguins_fold, formula = f1),
+         rmse_mdl2 = map_dbl(j, kfold_cv, df = penguins_fold, formula = f2),
+         rmse_mdl3 = map_dbl(j, kfold_cv, df = penguins_fold, formula = f3))
+
+rmse_means <- rmse_df %>%
+  summarize(across(starts_with('rmse'), mean))
+```
+
+
+# Once a model is chosen, use the whole dataset to parameterize
+
+Here the various models are very close in performance.  Which to use?  AIC and cross-validation both indicate model 2, though this isn't always the case.  If you're using your model to predict on new data, CV is probably the better way to go, though if your data set is small, AIC is probably better.
+
+So we will use the entire dataset, rather than testing/training sets, to identify the coefficients for the final predictive model, based on model 2.  We already did this earlier, but let's do it again just to make the point.
+
+```{r}
+final_mdl <- lm(f2, data = penguins_clean)
+summary(final_mdl)
+```
+
+Our final model:
+`r equatiomatic::extract_eq(mdl2, wrap = TRUE)`
+
+and with coefficients in place:
+`r equatiomatic::extract_eq(mdl2, wrap = TRUE, use_coefs = TRUE)`
+
