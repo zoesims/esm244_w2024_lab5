@@ -16,7 +16,7 @@ execute:
 library(tidyverse)
 library(palmerpenguins)
 library(AICcmodavg)    ### probably have to install this one
-library(equatiomatic)  ### remotes::install_github("datalorax/equatiomatic")
+library(equatiomatic)  ### optional - remotes::install_github("datalorax/equatiomatic")
 ```
 
 # Summary
@@ -25,8 +25,8 @@ We want to create a model we can use in the field to quickly and easily estimate
 
 Objectives:
 
-* Clean and prep the data
 * Set up several competing models
+    * Clean and prep the data
 * Compare models using information criteria
 * Compare models using cross-validation
     * Sub-objective: practice writing functions
@@ -49,8 +49,8 @@ penguins_clean <- penguins %>%
 
 ```{r}
 
-mdl1 <- lm(mass ~ bill_l + bill_d + flip_l + species + sex + island, 
-                  data = penguins_clean)
+mdl1 <- lm(formula = mass ~ bill_l + bill_d + flip_l + species + sex + island, 
+           data = penguins_clean)
 # summary(mdl1)
 ```
 
@@ -137,7 +137,7 @@ train_df <- penguins_fold %>%
 
 Write a quick function to calculate the root-mean-square error, which we can use to see which model predicts more accurately.
 
-Root - Mean - Square - Error
+Root - Mean - Square - Error - start at the end and work way towards front
 
 ### Why write a function?
 
@@ -199,24 +199,36 @@ But now, let's up the game to K-fold cross validation.  We already assigned 10 g
 `For` loops are a structure common to most programming languages, like functions - knowing how to use them (and their cousins, like the `apply` functions and the `purrr` package)  will make you a more effective coder.
 
 ```{r}
+### initialize an empty vector
+for(m in month.name) {
+  print(paste('month: ', m))
+}
+
 ### initialize a blank vector
 rmse_vec <- vector(length = folds)
 
 for(i in 1:folds) {
-  # i <- 1
+  ### split
+  ### train
+  ### test
+  ### save output
+  
+  ### split: 
   kfold_test_df <- penguins_fold %>%
     filter(group == i)
   kfold_train_df <- penguins_fold %>%
     filter(group != i)
   
+  ### train:
   kfold_lm1 <- lm(f1, data = kfold_train_df)
 
+  ### test:
   kfold_pred_df <- kfold_test_df %>%
     mutate(mdl = predict(kfold_lm1, kfold_test_df))
   kfold_rmse <- kfold_pred_df %>%
     summarize(rmse_mdl = calc_rmse(mdl, mass))
 
-  ### assign result to the rmse_vec in the proper spot
+  ### save result to the rmse_vec in the proper spot
   rmse_vec[i] <- kfold_rmse$rmse_mdl
 }
 
