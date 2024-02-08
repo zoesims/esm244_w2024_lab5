@@ -100,10 +100,6 @@ BIC(mdl1, mdl2, mdl3)
 # mdl2   8  4754.403
 # mdl3   7  4755.232
 
-AICcmodavg::AICc(mdl1)
-AICc(mdl2)
-AICc(mdl3)
-
 AICcmodavg::aictab(list(mdl1, mdl2, mdl3))
 AICcmodavg::bictab(list(mdl1, mdl2, mdl3))
 ```
